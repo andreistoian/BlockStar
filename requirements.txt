@@ -1,2 +1,4 @@
 black
 schedule
+matplotlib
+pandas

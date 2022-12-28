@@ -1,20 +1,37 @@
-import socket
-from datetime import datetime
-import json
-import os
 import argparse
 import glob
-import time
+import json
+import os
+import socket
 import threading
+import time
+from datetime import datetime
+from datetime import time as dtime
+from datetime import timedelta
+
+import matplotlib
+
+matplotlib.use("agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas
+import pandas as pd
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 1433
 
+INDOORS_LOG = "indoors.csv"
+WEATHER_LOG = "weather.csv"
+PIPES_LOG = "pipes.csv"
+INDOORS_GRAPH_PREFIX = "indoors_"
+INDOORS_GRAPH_EXT = ".png"
+
 whitelist_ids = []
 try:
-    whitelist_ids = map(
-        lambda s: int(s.strip()), open("whitelist_sensor_ids.txt", "r").read().split(",")
-    )
+    lines = open("whitelist_sensor_ids.txt", "r").readlines()
+    pairs = list(map(lambda s: s.split(","), lines))
+    whitelist_ids = dict(map(lambda s: (int(s[0].strip()), s[1].strip()), pairs))
+    print("Whitelisted ids: ", whitelist_ids)
 except:
     pass
 
@@ -62,9 +79,12 @@ def rtl_433_probe(args):
                         fp.write("datetime,sensor_id,temperature,battery_ok\n")
                 with open(out_file, "at") as fp:
                     fp.write(out_line)
+            else:
+                print("sensor not whitelisted", sensor_id)
 
         except KeyError:
             # The data record returned is not a valid temperature reading
+            print("InvalidData")
             pass
         except Exception as err:
             print(err)
@@ -80,12 +100,58 @@ def run(args):
     rtl_433_probe(args)
 
 
+def make_graphs(date_dir):
+    log_data = pandas.read_csv(os.path.join(date_dir, INDOORS_LOG))
+    unique_ids = log_data["sensor_id"].unique()
+
+    date_of_log = datetime.strptime(os.path.basename(date_dir), "%Y_%m_%d")
+    day_start_time = datetime.combine(date_of_log, dtime.min)
+    day_end_time = day_start_time + timedelta(days=1)
+
+    for sensor_id in unique_ids:
+        graph_file = os.path.join(
+            date_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + INDOORS_GRAPH_EXT
+        )
+        # Do not regenerate the graph if it exists
+        if os.path.exists(graph_file):
+            continue
+
+        sensor_values = log_data[log_data["sensor_id"] == sensor_id]
+        times = mdates.datestr2num(sensor_values["datetime"])
+        temps = sensor_values["temperature"]
+
+        fig, ax = plt.subplots(1)
+        fig.autofmt_xdate()
+        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=60))
+        ax.set_xlim([day_start_time, day_end_time])
+        ax.set_ylim([10, 40])
+        ax.set_yticks(range(10, 40, 1), minor=True)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+        plt.grid(True, which="both", axis="both")
+        plt.title(day_start_time.strftime("%Y-%m-%d") + " " + whitelist_ids[sensor_id])
+        plt.plot(times, temps)
+
+        plt.savefig(graph_file)
+
+
 def gen_graphs_thread(args):
-    print("Doing stuff...")
+    midnight = datetime.combine(datetime.today(), dtime.min)
     while True:
         for file in glob.glob(args.db_dir + "/*"):
-            if os.path.isdir(file):
-                print(file)
+            # Ignore non-directories
+            if not os.path.isdir(file):
+                continue
+            try:
+                date_dir = datetime.strptime(os.path.basename(file), "%Y_%m_%d")
+                # If it's a log directory with a date its name, check it's earlier than today
+                if date_dir >= midnight:
+                    continue
+                make_graphs(file)
+            except Exception as err:
+                # Ignore exceptions (bad date format, bad data, etc)
+                raise Exception() from err
+
         time.sleep(60)
 
 
