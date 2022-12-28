@@ -1,10 +1,14 @@
 import argparse
+import functools
 import glob
+import http.server
 import json
 import os
 import socket
+import socketserver
 import threading
 import time
+import traceback
 from datetime import datetime
 from datetime import time as dtime
 from datetime import timedelta
@@ -100,6 +104,28 @@ def run(args):
     rtl_433_probe(args)
 
 
+def render_graph(day_start_time, day_end_time, sensor_name, times, temps, graph_file, legend=None):
+    fig, ax = plt.subplots(1)
+    fig.autofmt_xdate()
+    ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=60))
+    ax.set_xlim([day_start_time, day_end_time])
+    ax.set_ylim([10, 40])
+    ax.set_yticks(range(10, 40, 1), minor=True)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90, ha="center")
+    plt.grid(True, which="both", axis="both")
+    plt.title(day_start_time.strftime("%Y-%m-%d") + " " + sensor_name)
+    if isinstance(times, list) and isinstance(temps, list):
+        for ti, te in zip(times, temps):
+            plt.plot(ti, te)
+    else:
+        plt.plot(times, temps)
+    if legend:
+        plt.legend(legend)
+
+    plt.savefig(graph_file)
+
+
 def make_graphs(date_dir):
     log_data = pandas.read_csv(os.path.join(date_dir, INDOORS_LOG))
     unique_ids = log_data["sensor_id"].unique()
@@ -108,31 +134,33 @@ def make_graphs(date_dir):
     day_start_time = datetime.combine(date_of_log, dtime.min)
     day_end_time = day_start_time + timedelta(days=1)
 
+    all_times = []
+    all_temps = []
+    all_titles = []
+
     for sensor_id in unique_ids:
         graph_file = os.path.join(
             date_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + INDOORS_GRAPH_EXT
         )
-        # Do not regenerate the graph if it exists
-        if os.path.exists(graph_file):
-            continue
 
         sensor_values = log_data[log_data["sensor_id"] == sensor_id]
         times = mdates.datestr2num(sensor_values["datetime"])
         temps = sensor_values["temperature"]
 
-        fig, ax = plt.subplots(1)
-        fig.autofmt_xdate()
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=60))
-        ax.set_xlim([day_start_time, day_end_time])
-        ax.set_ylim([10, 40])
-        ax.set_yticks(range(10, 40, 1), minor=True)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
-        plt.grid(True, which="both", axis="both")
-        plt.title(day_start_time.strftime("%Y-%m-%d") + " " + whitelist_ids[sensor_id])
-        plt.plot(times, temps)
+        graph_title = str(sensor_id) + ": " + whitelist_ids[sensor_id]
+        # Do not regenerate the graph if it exists
+        if not os.path.exists(graph_file):
+            render_graph(day_start_time, day_end_time, graph_title, times, temps, graph_file)
 
-        plt.savefig(graph_file)
+        all_times.append(times)
+        all_temps.append(temps)
+        all_titles.append(graph_title)
+
+    graph_file = os.path.join(date_dir, INDOORS_GRAPH_PREFIX + "all" + INDOORS_GRAPH_EXT)
+    if not os.path.exists(graph_file):
+        render_graph(
+            day_start_time, day_end_time, "ALL", all_times, all_temps, graph_file, all_titles
+        )
 
 
 def gen_graphs_thread(args):
@@ -150,23 +178,42 @@ def gen_graphs_thread(args):
                 make_graphs(file)
             except Exception as err:
                 # Ignore exceptions (bad date format, bad data, etc)
-                raise Exception() from err
+                traceback.print_exc()
+                print(err)
 
         time.sleep(60)
 
 
 def start_graph_gen(args):
-    import functools
-
     worker_thread = threading.Thread(target=functools.partial(gen_graphs_thread, args))
+    worker_thread.start()
+
+
+def httpserver_thread(args):
+    PORT = args.http_port
+    DIRECTORY = args.db_dir
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=DIRECTORY, **kwargs)
+
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print("Server started at localhost:" + str(PORT))
+        httpd.serve_forever()
+
+
+def start_httpserver(args):
+    worker_thread = threading.Thread(target=functools.partial(httpserver_thread, args))
     worker_thread.start()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--db_dir", help="Directory where to store the database", default="./")
+    parser.add_argument("--http_port", help="HTTP serving port", default=9000)
 
     args = parser.parse_args()
 
+    start_httpserver(args)
     start_graph_gen(args)
     run(args)
