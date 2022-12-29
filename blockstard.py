@@ -14,12 +14,11 @@ from datetime import time as dtime
 from datetime import timedelta
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-import pandas
-import pandas as pd
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 1433
@@ -131,9 +130,31 @@ def is_file_older(file, hours=1):
     return datetime.today() - graph_creation_time > timedelta(hours=hours)
 
 
+class CSVLog:
+    def __init__(self, csv_file: str):
+        with open(csv_file, "rt") as fp:
+            lines = fp.readlines()
+
+        self.header = lines[0].split(",")
+        self.values = []
+        lines.pop(0)
+        for l in lines:
+            self.values.append(l.split(","))
+
+    def get_column_values(self, colname, dtype):
+        idx = self.header.index(colname)
+        all_values = []
+        for v in self.values:
+            all_values.append(v[idx])
+        if dtype is str:
+            return all_values
+        return np.array(all_values, dtype=dtype)
+
+
 def make_graphs(date_dir, is_today):
-    log_data = pandas.read_csv(os.path.join(date_dir, INDOORS_LOG))
-    unique_ids = log_data["sensor_id"].unique()
+    log_data = CSVLog(os.path.join(date_dir, INDOORS_LOG))
+    sensor_id_values = log_data.get_column_values("sensor_id", np.int32)
+    unique_ids = np.unique(sensor_id_values)
 
     date_of_log = datetime.strptime(os.path.basename(date_dir), "%Y_%m_%d")
     day_start_time = datetime.combine(date_of_log, dtime.min)
@@ -150,16 +171,16 @@ def make_graphs(date_dir, is_today):
             use_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + INDOORS_GRAPH_EXT
         )
 
-        sensor_values = log_data[log_data["sensor_id"] == sensor_id]
-        times = mdates.datestr2num(sensor_values["datetime"])
-        temps = sensor_values["temperature"]
+        sensor_idx = np.where(sensor_id_values == sensor_id)
+        times = mdates.datestr2num(log_data.get_column_values("datetime", np.object_)[sensor_idx])
+        temps = log_data.get_column_values("temperature", np.float32)[sensor_idx]
 
         graph_title = str(sensor_id) + ": " + whitelist_ids[sensor_id]
         # Do not regenerate the graph if it exists
 
         render_this_graph = False
         if not os.path.exists(graph_file):
-            # If today's data and the graph does not exist, make it 
+            # If today's data and the graph does not exist, make it
             # if it's yesterday's data and the graph does not exist make it
             render_this_graph = True
         elif is_today and is_file_older(graph_file):
