@@ -12,9 +12,12 @@ import traceback
 from datetime import datetime
 from datetime import time as dtime
 from datetime import timedelta
+from urllib.parse import urlparse
 
 import matplotlib
 import numpy as np
+import requests
+from dateutil import tz
 
 matplotlib.use("agg")
 import matplotlib.dates as mdates
@@ -27,7 +30,8 @@ INDOORS_LOG = "indoors.csv"
 WEATHER_LOG = "weather.csv"
 PIPES_LOG = "pipes.csv"
 INDOORS_GRAPH_PREFIX = "indoors_"
-INDOORS_GRAPH_EXT = ".png"
+GRAPH_EXT = ".png"
+WEATHER_GRAPH_PREFIX = "weather_"
 
 whitelist_ids = []
 try:
@@ -101,22 +105,32 @@ def run(args):
     rtl_433_probe(args)
 
 
-def render_graph(day_start_time, day_end_time, sensor_name, times, temps, graph_file, legend=None):
+def render_graph(
+    day_start_time, day_end_time, sensor_name, times, values, graph_file, legend=None, autoY=False
+):
     fig, ax = plt.subplots(1)
+
+    # Format date/time axis (X)
     fig.autofmt_xdate()
     ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=60))
     ax.set_xlim([day_start_time, day_end_time])
-    ax.set_ylim([10, 40])
-    ax.set_yticks(range(10, 40, 1), minor=True)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=90, ha="center")
+
+    if not autoY:
+        ax.set_ylim([10, 40])
+        ax.set_yticks(range(10, 40, 1), minor=True)
+
     plt.grid(True, which="both", axis="both")
     plt.title(day_start_time.strftime("%Y-%m-%d") + " " + sensor_name)
-    if isinstance(times, list) and isinstance(temps, list):
-        for ti, te in zip(times, temps):
+    if isinstance(times, list) and isinstance(values, list):
+        for ti, te in zip(times, values):
             plt.plot(ti, te)
+    elif isinstance(values, list):
+        for v in values:
+            plt.plot(times, v)
     else:
-        plt.plot(times, temps)
+        plt.plot(times, values)
     if legend:
         plt.legend(legend)
 
@@ -137,7 +151,7 @@ class CSVLog:
         with open(csv_file, "rt") as fp:
             lines = fp.readlines()
 
-        self.header = lines[0].split(",")
+        self.header = lines[0].strip().split(",")
         self.values = []
         lines.pop(0)
         for l in lines:
@@ -147,7 +161,11 @@ class CSVLog:
         idx = self.header.index(colname)
         all_values = []
         for v in self.values:
-            all_values.append(v[idx])
+            try:
+                np.array(v[idx], dtype=dtype)
+                all_values.append(v[idx])
+            except:
+                all_values.append(None)
         if dtype is str:
             return all_values
         return np.array(all_values, dtype=dtype)
@@ -172,9 +190,7 @@ def make_graphs(date_dir, is_today):
         if sensor_id not in whitelist_ids:
             continue
 
-        graph_file = os.path.join(
-            use_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + INDOORS_GRAPH_EXT
-        )
+        graph_file = os.path.join(use_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + GRAPH_EXT)
 
         sensor_idx = np.where(sensor_id_values == sensor_id)
         times = mdates.datestr2num(log_data.get_column_values("datetime", np.object_)[sensor_idx])
@@ -199,7 +215,7 @@ def make_graphs(date_dir, is_today):
         all_temps.append(temps)
         all_titles.append(graph_title)
 
-    graph_file = os.path.join(use_dir, INDOORS_GRAPH_PREFIX + "all" + INDOORS_GRAPH_EXT)
+    graph_file = os.path.join(use_dir, INDOORS_GRAPH_PREFIX + "all" + GRAPH_EXT)
     render_this_graph = False
     if not os.path.exists(graph_file):
         render_this_graph = True
@@ -233,11 +249,6 @@ def gen_graphs_thread(args):
         time.sleep(60)
 
 
-def start_graph_gen(args):
-    worker_thread = threading.Thread(target=functools.partial(gen_graphs_thread, args))
-    worker_thread.start()
-
-
 def httpserver_thread(args):
     PORT = args.http_port
     DIRECTORY = args.db_dir
@@ -256,8 +267,135 @@ def httpserver_thread(args):
         httpd.serve_forever()
 
 
+def weather_record_to_csv(json_record: dict, csv_header: list) -> str:
+    # METHOD 2: Auto-detect zones:
+    from_zone = tz.tzutc()
+    to_zone = tz.tzlocal()
+
+    # utc = datetime.utcnow()
+    utc = datetime.strptime(json_record["dh_utc"], "%Y-%m-%d %H:%M:%S")
+
+    # Tell the datetime object that it's in UTC time zone since
+    # datetime objects are 'naive' by default
+    utc = utc.replace(tzinfo=from_zone)
+
+    # Convert time zone
+    out_values = [""] * len(csv_header)
+    out_values[csv_header.index("dh_utc")] = utc.astimezone(to_zone).strftime("%Y-%m-%d %H:%M:%S")
+
+    def copy_value(key):
+        out_values[csv_header.index(key)] = json_record[key]
+
+    copy_value("temperature")
+    copy_value("humidite")
+    copy_value("vent_moyen")
+    copy_value("vent_rafales")
+    copy_value("pluie_1h")
+    copy_value("nebulosite")
+
+    return ",".join(out_values)
+
+
+def make_weather_graphs(date_dir):
+    log_data = CSVLog(os.path.join(date_dir, WEATHER_LOG))
+
+    date_of_log = datetime.strptime(os.path.basename(date_dir), "%Y_%m_%d")
+    day_start_time = datetime.combine(date_of_log, dtime.min)
+    day_end_time = day_start_time + timedelta(days=1)
+
+    times = mdates.datestr2num(log_data.get_column_values("datetime", np.object_))
+    for key in ["temperature", "cloudcover", ("wind_avg", "wind_burst"), "rain_1h"]:
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        all_vals = []
+        all_names = []
+        for k in key:
+            all_vals.append(log_data.get_column_values(k, np.float32))
+            all_names.append(k)
+
+        graph_tile = "-".join(key)
+        graph_file = os.path.join(date_dir, WEATHER_GRAPH_PREFIX + graph_tile + GRAPH_EXT)
+
+        render_graph(
+            day_start_time,
+            day_end_time,
+            graph_tile,
+            times,
+            all_vals,
+            graph_file,
+            legend=all_names,
+            autoY=True,
+        )
+
+
+def weather_thread(args):
+    try:
+        base_url_to_get = open("infoclimat.key", "rt").read().strip()
+    except:
+        print("Weather URL not configured!!")
+        return
+
+    infoclimat_header = [
+        "dh_utc",
+        "temperature",
+        "humidite",
+        "vent_moyen",
+        "vent_rafales",
+        "pluie_1h",
+        "nebulosite",
+    ]
+    out_header = ",".join(
+        ["datetime", "temperature", "humidity", "wind_avg", "wind_burst", "rain_1h", "cloudcover"]
+    )
+
+    base_url_parts = urlparse(base_url_to_get)
+    url_to_get = base_url_parts.scheme + "://" + base_url_parts.netloc + base_url_parts.path
+    while True:
+        date_to_get = datetime.today().strftime("%Y-%m-%d")
+        query = base_url_parts.query + "&start=" + date_to_get + "&end=" + date_to_get
+        params = {}
+        for qnv in query.split("&"):
+            qnv_parts = qnv.split("=")
+            params[qnv_parts[0]] = qnv_parts[1]
+
+        out_dir = os.path.join(args.db_dir, datetime.today().strftime("%Y_%m_%d"))
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        out_file = os.path.join(out_dir, WEATHER_LOG)
+
+        try:
+            response = requests.get(url_to_get, params)
+            response.raise_for_status()
+            jsonResponse = response.json()
+
+            hourly_data = jsonResponse["hourly"][params["stations[]"]]
+            with open(out_file, "wt") as fp:
+                fp.write(out_header + "\n")
+                for _, record in enumerate(hourly_data):
+                    csv_record = weather_record_to_csv(record, infoclimat_header)
+                    fp.write(csv_record + "\n")
+        except Exception as err:
+            print(err)
+
+        make_weather_graphs(out_dir)
+
+        time.sleep(60 * 20)
+
+
+def start_graph_gen(args):
+    worker_thread = threading.Thread(target=functools.partial(gen_graphs_thread, args))
+    worker_thread.start()
+
+
 def start_httpserver(args):
     worker_thread = threading.Thread(target=functools.partial(httpserver_thread, args))
+    worker_thread.start()
+
+
+def start_weather_thread(args):
+    worker_thread = threading.Thread(target=functools.partial(weather_thread, args))
     worker_thread.start()
 
 
@@ -268,6 +406,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    start_weather_thread(args)
     start_httpserver(args)
     start_graph_gen(args)
     run(args)
