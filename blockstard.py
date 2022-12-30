@@ -249,7 +249,7 @@ def httpserver_thread(args):
 
         def end_headers(self):
             self.send_header("Cache-Control", "no-cache, no-store")
-            super().end_headers(self)
+            super().end_headers()
 
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print("Server started at localhost:" + str(PORT))
