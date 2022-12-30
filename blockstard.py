@@ -125,9 +125,10 @@ def render_graph(day_start_time, day_end_time, sensor_name, times, temps, graph_
 
 def is_file_older(file, hours=1):
     ti_c = os.path.getctime(file)
-    c_ti = time.ctime(ti_c)
-    graph_creation_time = time.strptime(c_ti)
-    return datetime.today() - graph_creation_time > timedelta(hours=hours)
+    graph_creation_time = datetime.fromtimestamp(ti_c)
+    today = datetime.today()
+    diff = today - graph_creation_time
+    return diff > timedelta(hours=hours)
 
 
 class CSVLog:
@@ -167,6 +168,9 @@ def make_graphs(date_dir, is_today):
     use_dir = date_dir if not is_today else os.path.dirname(date_dir)
 
     for sensor_id in unique_ids:
+        if sensor_id not in whitelist_ids:
+            continue
+
         graph_file = os.path.join(
             use_dir, INDOORS_GRAPH_PREFIX + str(sensor_id) + INDOORS_GRAPH_EXT
         )
@@ -202,7 +206,8 @@ def make_graphs(date_dir, is_today):
         # Current day's graph, save to root DB dir
         render_this_graph = True
 
-    render_graph(day_start_time, day_end_time, "ALL", all_times, all_temps, graph_file, all_titles)
+    if render_this_graph:
+        render_graph(day_start_time, day_end_time, "ALL", all_times, all_temps, graph_file, all_titles)
 
 
 def gen_graphs_thread(args):
@@ -236,7 +241,8 @@ def httpserver_thread(args):
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=DIRECTORY, **kwargs)
+            super().__init__(*args, **kwargs)
+            self.directory = DIRECTORY
 
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print("Server started at localhost:" + str(PORT))
