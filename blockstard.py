@@ -208,7 +208,9 @@ def make_graphs(date_dir, is_today):
         render_this_graph = True
 
     if render_this_graph:
-        render_graph(day_start_time, day_end_time, "ALL", all_times, all_temps, graph_file, all_titles)
+        render_graph(
+            day_start_time, day_end_time, "ALL", all_times, all_temps, graph_file, all_titles
+        )
 
 
 def gen_graphs_thread(args):
@@ -242,8 +244,12 @@ def httpserver_thread(args):
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
             self.directory = DIRECTORY
+            super().__init__(*args, **kwargs)
+
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-cache, no-store")
+            super().end_headers(self)
 
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print("Server started at localhost:" + str(PORT))
