@@ -121,6 +121,7 @@ def render_graph(day_start_time, day_end_time, sensor_name, times, temps, graph_
         plt.legend(legend)
 
     plt.savefig(graph_file)
+    plt.close()
 
 
 def is_file_older(file, hours=1):
