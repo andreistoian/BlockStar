@@ -172,7 +172,13 @@ class CSVLog:
 
 
 def make_graphs(date_dir, is_today):
-    log_data = CSVLog(os.path.join(date_dir, INDOORS_LOG))
+    indoors_log_file = os.path.join(date_dir, INDOORS_LOG)
+
+    if not os.path.exists(indoors_log_file):
+        # Directory could exist but does not contain indoors log data
+        return
+
+    log_data = CSVLog(indoors_log_file)
     sensor_id_values = log_data.get_column_values("sensor_id", np.int32)
     unique_ids = np.unique(sensor_id_values)
 
@@ -255,14 +261,17 @@ def httpserver_thread(args):
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            self.directory = DIRECTORY
+            kwargs["directory"] = DIRECTORY
             super().__init__(*args, **kwargs)
 
         def end_headers(self):
             self.send_header("Cache-Control", "no-cache, no-store")
             super().end_headers()
 
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        pass
+
+    with ThreadedTCPServer(("", PORT), Handler) as httpd:
         print("Server started at localhost:" + str(PORT))
         httpd.serve_forever()
 
@@ -379,7 +388,9 @@ def weather_thread(args):
         except Exception as err:
             print(err)
 
-        make_weather_graphs(out_dir)
+        # If downloaded ok
+        if os.path.exists(out_file):
+            make_weather_graphs(out_dir)
 
         time.sleep(60 * 20)
 
