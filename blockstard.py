@@ -261,7 +261,6 @@ def httpserver_thread(args):
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            kwargs["directory"] = DIRECTORY
             super().__init__(*args, **kwargs)
 
         def end_headers(self):
