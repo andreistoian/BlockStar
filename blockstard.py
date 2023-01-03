@@ -292,7 +292,7 @@ def weather_record_to_csv(json_record: dict, csv_header: list) -> str:
     out_values[csv_header.index("dh_utc")] = utc.astimezone(to_zone).strftime("%Y-%m-%d %H:%M:%S")
 
     def copy_value(key):
-        out_values[csv_header.index(key)] = json_record[key]
+        out_values[csv_header.index(key)] = json_record[key] if json_record[key] is not None else ""
 
     copy_value("temperature")
     copy_value("humidite")
