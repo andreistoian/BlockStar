@@ -139,7 +139,7 @@ def render_graph(
 
 
 def is_file_older(file, hours=1):
-    ti_c = os.path.getctime(file)
+    ti_c = os.path.getmtime(file)
     graph_creation_time = datetime.fromtimestamp(ti_c)
     today = datetime.today()
     diff = today - graph_creation_time
@@ -412,7 +412,7 @@ def start_weather_thread(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--db_dir", help="Directory where to store the database", default="./")
-    parser.add_argument("--http_port", help="HTTP serving port", default=9000)
+    parser.add_argument("--http_port", help="HTTP serving port", default=9000, type=int)
 
     args = parser.parse_args()
 
