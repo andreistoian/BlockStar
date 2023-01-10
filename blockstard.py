@@ -134,7 +134,11 @@ def render_graph(
     if legend:
         plt.legend(legend)
 
-    plt.savefig(graph_file)
+    try:
+        plt.savefig(graph_file)
+    except Exception as err:
+        print(err)
+
     plt.close()
 
 
