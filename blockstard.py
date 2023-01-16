@@ -175,7 +175,7 @@ class CSVLog:
         return np.array(all_values, dtype=dtype)
 
 
-def make_graphs(date_dir, is_today):
+def make_graphs(date_dir, is_today, debug):
     indoors_log_file = os.path.join(date_dir, INDOORS_LOG)
 
     if not os.path.exists(indoors_log_file):
@@ -213,9 +213,13 @@ def make_graphs(date_dir, is_today):
         if not os.path.exists(graph_file):
             # If today's data and the graph does not exist, make it
             # if it's yesterday's data and the graph does not exist make it
+            if debug:
+                print(f"[{datetime.now()}] Making graph {graph_file} because it does not exist!")
             render_this_graph = True
         elif is_today and is_file_older(graph_file):
             # Current day's graph, if it's more than 1 hour old, make it, save to root DB dir
+            if debug:
+                print(f"[{datetime.now()}] Making graph {graph_file} because it needs refreshing!")
             render_this_graph = True
 
         if render_this_graph:
@@ -228,9 +232,13 @@ def make_graphs(date_dir, is_today):
     graph_file = os.path.join(use_dir, INDOORS_GRAPH_PREFIX + "all" + GRAPH_EXT)
     render_this_graph = False
     if not os.path.exists(graph_file):
+        if debug:
+            print(f"[{datetime.now()}] Making graph {graph_file} because it does not exist!")
         render_this_graph = True
     elif is_today and is_file_older(graph_file):
         # Current day's graph, save to root DB dir
+        if debug:
+            print(f"[{datetime.now()}] Making graph {graph_file} because it needs refreshing!")
         render_this_graph = True
 
     if render_this_graph:
@@ -250,7 +258,7 @@ def gen_graphs_thread(args):
                 date_dir = datetime.strptime(os.path.basename(file), "%Y_%m_%d")
                 # If it's a log directory with a date its name, check it's earlier than today
                 is_today = date_dir >= midnight
-                make_graphs(file, is_today)
+                make_graphs(file, is_today, args.debug)
             except Exception as err:
                 # Ignore exceptions (bad date format, bad data, etc)
                 traceback.print_exc()
@@ -417,6 +425,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--db_dir", help="Directory where to store the database", default="./")
     parser.add_argument("--http_port", help="HTTP serving port", default=9000, type=int)
+    parser.add_argument("--debug", help="Enable debug output", action="store_true")
 
     args = parser.parse_args()
 
