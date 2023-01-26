@@ -238,7 +238,10 @@ def make_graphs(date_dir, is_today, debug):
     elif is_today and is_file_older(graph_file):
         # Current day's graph, save to root DB dir
         if debug:
-            print(f"[{datetime.now()}] Making graph {graph_file} because it needs refreshing!")
+            print(
+                f"[{datetime.now()}] Making graph {graph_file} because it needs refreshing! "
+                f"daystart={day_start_time}, logfile={indoors_log_file}"
+            )
         render_this_graph = True
 
     if render_this_graph:
@@ -248,8 +251,8 @@ def make_graphs(date_dir, is_today, debug):
 
 
 def gen_graphs_thread(args):
-    midnight = datetime.combine(datetime.today(), dtime.min)
     while True:
+        midnight = datetime.combine(datetime.today(), dtime.min)
         for file in glob.glob(args.db_dir + "/*"):
             # Ignore non-directories
             if not os.path.isdir(file):
