@@ -369,13 +369,14 @@ def weather_thread(args):
                 continue
             
             try:
-                date_dir = datetime.strptime(os.path.basename(file), "%Y_%m_%d")
+                out_dir_date = os.path.basename(file)
+                date_dir = datetime.strptime(out_dir_date, "%Y_%m_%d")
                 # If it's a log directory with a date its name, check it's earlier than today
                 midnight = datetime.combine(datetime.today(), dtime.min)
                 is_today = date_dir >= midnight
                 if not is_today:
                     params = make_query_params_weather(base_url_parts)
-                    process_weather(url_to_get, params, out_dir)
+                    process_weather(url_to_get, params, file)
             except Exception as err:
                 # Ignore exceptions (bad date format, bad data, etc)
                 traceback.print_exc()
