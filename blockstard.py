@@ -374,7 +374,7 @@ def weather_thread(args):
                 # If it's a log directory with a date its name, check it's earlier than today
                 midnight = datetime.combine(datetime.today(), dtime.min)
                 is_today = date_dir >= midnight
-                if not is_today:
+                if not is_today and not os.path.exists(os.path.join(file, "weather.csv")):
                     params = make_query_params_weather(base_url_parts)
                     process_weather(url_to_get, params, file)
             except Exception as err:
