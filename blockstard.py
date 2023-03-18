@@ -359,6 +359,44 @@ def weather_thread(args):
         print("Weather URL not configured!!")
         return
 
+    base_url_parts = urlparse(base_url_to_get)
+    url_to_get = base_url_parts.scheme + "://" + base_url_parts.netloc + base_url_parts.path
+    while True:
+        # Download weather for past dates if needed
+        for file in glob.glob(args.db_dir + "/*"):
+            # Ignore non-directories
+            if not os.path.isdir(file):
+                continue
+            
+            try:
+                date_dir = datetime.strptime(os.path.basename(file), "%Y_%m_%d")
+                # If it's a log directory with a date its name, check it's earlier than today
+                midnight = datetime.combine(datetime.today(), dtime.min)
+                is_today = date_dir >= midnight
+                if not is_today:
+                    process_weather(url_to_get, params, out_dir)
+            except Exception as err:
+                # Ignore exceptions (bad date format, bad data, etc)
+                traceback.print_exc()
+                print(err)
+
+        # Process today's weather
+        date_to_get = datetime.today().strftime("%Y-%m-%d")
+        query = base_url_parts.query + "&start=" + date_to_get + "&end=" + date_to_get
+        params = {}
+        for qnv in query.split("&"):
+            qnv_parts = qnv.split("=")
+            params[qnv_parts[0]] = qnv_parts[1]
+
+        out_dir = os.path.join(args.db_dir, datetime.today().strftime("%Y_%m_%d"))
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        process_weather(url_to_get, params, out_dir)
+
+        time.sleep(60 * 20)
+
+def process_weather(url_to_get, params, out_dir):
     infoclimat_header = [
         "dh_utc",
         "temperature",
@@ -372,41 +410,25 @@ def weather_thread(args):
         ["datetime", "temperature", "humidity", "wind_avg", "wind_burst", "rain_1h", "cloudcover"]
     )
 
-    base_url_parts = urlparse(base_url_to_get)
-    url_to_get = base_url_parts.scheme + "://" + base_url_parts.netloc + base_url_parts.path
-    while True:
-        date_to_get = datetime.today().strftime("%Y-%m-%d")
-        query = base_url_parts.query + "&start=" + date_to_get + "&end=" + date_to_get
-        params = {}
-        for qnv in query.split("&"):
-            qnv_parts = qnv.split("=")
-            params[qnv_parts[0]] = qnv_parts[1]
+    out_file = os.path.join(out_dir, WEATHER_LOG)
 
-        out_dir = os.path.join(args.db_dir, datetime.today().strftime("%Y_%m_%d"))
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
+    try:
+        response = requests.get(url_to_get, params)
+        response.raise_for_status()
+        jsonResponse = response.json()
 
-        out_file = os.path.join(out_dir, WEATHER_LOG)
-
-        try:
-            response = requests.get(url_to_get, params)
-            response.raise_for_status()
-            jsonResponse = response.json()
-
-            hourly_data = jsonResponse["hourly"][params["stations[]"]]
-            with open(out_file, "wt") as fp:
-                fp.write(out_header + "\n")
-                for _, record in enumerate(hourly_data):
-                    csv_record = weather_record_to_csv(record, infoclimat_header)
-                    fp.write(csv_record + "\n")
-        except Exception as err:
-            print(err)
+        hourly_data = jsonResponse["hourly"][params["stations[]"]]
+        with open(out_file, "wt") as fp:
+            fp.write(out_header + "\n")
+            for _, record in enumerate(hourly_data):
+                csv_record = weather_record_to_csv(record, infoclimat_header)
+                fp.write(csv_record + "\n")
+    except Exception as err:
+        print(err)
 
         # If downloaded ok
-        if os.path.exists(out_file):
-            make_weather_graphs(out_dir)
-
-        time.sleep(60 * 20)
+    if os.path.exists(out_file):
+        make_weather_graphs(out_dir)
 
 
 def start_graph_gen(args):
