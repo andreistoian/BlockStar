@@ -374,6 +374,7 @@ def weather_thread(args):
                 midnight = datetime.combine(datetime.today(), dtime.min)
                 is_today = date_dir >= midnight
                 if not is_today:
+                    params = make_query_params_weather(base_url_parts)
                     process_weather(url_to_get, params, out_dir)
             except Exception as err:
                 # Ignore exceptions (bad date format, bad data, etc)
@@ -381,12 +382,7 @@ def weather_thread(args):
                 print(err)
 
         # Process today's weather
-        date_to_get = datetime.today().strftime("%Y-%m-%d")
-        query = base_url_parts.query + "&start=" + date_to_get + "&end=" + date_to_get
-        params = {}
-        for qnv in query.split("&"):
-            qnv_parts = qnv.split("=")
-            params[qnv_parts[0]] = qnv_parts[1]
+        params = make_query_params_weather(base_url_parts)
 
         out_dir = os.path.join(args.db_dir, datetime.today().strftime("%Y_%m_%d"))
         if not os.path.exists(out_dir):
@@ -395,6 +391,15 @@ def weather_thread(args):
         process_weather(url_to_get, params, out_dir)
 
         time.sleep(60 * 20)
+
+def make_query_params_weather(base_url_parts):
+    date_to_get = datetime.today().strftime("%Y-%m-%d")
+    query = base_url_parts.query + "&start=" + date_to_get + "&end=" + date_to_get
+    params = {}
+    for qnv in query.split("&"):
+        qnv_parts = qnv.split("=")
+        params[qnv_parts[0]] = qnv_parts[1]
+    return params
 
 def process_weather(url_to_get, params, out_dir):
     infoclimat_header = [
